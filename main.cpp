@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <typeindex>
 #include <algorithm>
+#include <cassert>
 #include "vector"
 #include "unordered_map"
 #include "optional"
@@ -16,8 +17,6 @@ struct Component {
     Entity *parent = nullptr;
 
     virtual void update() = 0;
-
-//    virtual ~Component() = 0;
 };
 
 struct CustomComponent1 : Component {
@@ -61,8 +60,8 @@ struct Arena {
         auto t = type_index(typeid(T));
         if (pull.contains(t)) {
             auto &[size, ptr] = pull.at(t);
-            void *void_ptr = &ptr[size * sizeof(T)];
-            auto instance = new(void_ptr) T;
+            auto instance_ptr = &ptr[size * sizeof(T)];
+            auto instance = new(instance_ptr) T;
             size++;
             return instance;
         } else {
@@ -78,9 +77,10 @@ struct Arena {
             vector<T *> result;
             auto &[size, ptr] = pull.at(t);
             for (auto i = 0; i < size; i++) {
-                void *void_ptr = &ptr[i * sizeof(T)];
-                auto instance_ptr = dynamic_cast<T *>(void_ptr);
-                result.push_back(instance_ptr);
+                auto instance_ptr = dynamic_cast<T *>(&ptr[i * sizeof(T)]);
+                if (instance_ptr != nullptr) {
+                    result.push_back(instance_ptr);
+                }
             }
             return result;
         }
@@ -93,34 +93,16 @@ struct Arena {
         if (pull.contains(t)) {
             auto &[size, ptr] = pull.at(t);
             for (auto i = 0; i < size; i++) {
-                void *void_ptr = &ptr[i * sizeof(T)];
-                auto instance_ptr = (T *) (void_ptr);
-                if (instance_ptr != nullptr) {
-                    delete instance_ptr;
-                }
-                return true;
+                auto start_ptr = &ptr[i * sizeof(T)];
+                auto instance_ptr = (T *) (start_ptr);
+                delete instance_ptr;
             }
+            pull.erase(t);
+//            delete ptr; BUG
+            return true;
         }
         return false;
     }
-
-    template<typename T>
-    bool destroy_instance(T *to_remove) {
-        auto t = type_index(typeid(T));
-        if (pull.contains(t)) {
-            auto &[size, ptr] = pull.at(t);
-            for (auto i = 0; i < size; i++) {
-                void *void_ptr = &ptr[i * sizeof(T)];
-                auto instance_ptr = (T *) void_ptr; //dynamic_cast<CustomComponent1 *>(void_ptr);
-                if (instance_ptr != nullptr && instance_ptr == to_remove) {
-                    delete instance_ptr;
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
 
     ~Arena() {
         // note: it doesn't call destroy_all_instances_of_type and therefore no destructor is called
@@ -130,6 +112,7 @@ struct Arena {
             auto &[_, ptr] = tuple;
             delete ptr;
         }
+        std::cout << "arena destroyed\n";
     }
 } arena;
 
@@ -137,7 +120,7 @@ struct Arena {
 struct Entity {
     const string tag{};
 
-    unordered_map<type_index, Component *> hot_components{};
+    unordered_map<type_index, Component *> hot_components{}; // for frequently accessed components. It's long to add components and iterate over them, but fast to seek
     vector<tuple<type_index, Component *>> cold_components{};
 
     template<typename T>
@@ -177,9 +160,7 @@ struct Entity {
         size_t i = 0;
         for (auto &[comp_type, comp_ptr]: cold_components) {
             if (comp_type == t) {
-                T *component_ptr = dynamic_cast<T *>(comp_ptr);
                 cold_components[i] = {type_index(typeid(void *)), nullptr};
-                arena.destroy_instance<T>(component_ptr);
                 return true;
             }
             i++;
@@ -187,13 +168,17 @@ struct Entity {
         return false;
     }
 
-    void cleanup() {
+    void cleanup() { // filter out empty cold components
         auto void_ptr_ind = type_index(typeid(void *));
         std::copy_if(cold_components.begin(), cold_components.end(), std::back_inserter(cold_components),
                      [&void_ptr_ind](tuple<type_index, Component *> &tuple) {
                          return get<type_index>(tuple) != void_ptr_ind;
                      }
         );
+    }
+
+    ~Entity() {
+        std::cout << "Entity destroyed\n";
     }
 };
 
@@ -204,9 +189,11 @@ int main() {
     c1->x = 1;
     c1->update();
     c2->update();
-    entity->remove_component<CustomComponent2>();
+    assert(entity->remove_component<CustomComponent2>());
+    assert(!entity->remove_component<CustomComponent2>()); // check double deletion
     entity->cleanup();
-    arena.destroy_instance<CustomComponent1>(c1);
-    arena.destroy_all_instances_of_type<CustomComponent2>();
+    assert(arena.destroy_all_instances_of_type<Entity>());
+    assert(arena.destroy_all_instances_of_type<CustomComponent1>());
+    assert(arena.destroy_all_instances_of_type<CustomComponent2>());
     return 0;
 }
