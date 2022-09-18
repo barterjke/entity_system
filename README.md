@@ -24,12 +24,14 @@ int main(){
 }
 ```
 Problem with this we can have so many components, all different size, and straight up allocation is bad in many way, because you end up jumping around in memory.
+
 ![img.png](https://www.david-colson.com/assets/images/ecsArticle/Figure1.png)
 
 What we are trying to achieve is something like this:
+
 ![img_1.png](https://www.david-colson.com/assets/images/ecsArticle/Figure2.png)
 
-##### Implementation:
+#### Implementation:
 ```c++
 struct Arena {
     unordered_map<type_index, tuple<size_t, char *>> pull;
@@ -49,7 +51,8 @@ struct Arena {
     ~Arena();
     // note: it doesn't call destroy_all_instances_of_type and therefore no destructor is called
     // you can add it manually for every existing component, like:
-    // destroy_all_instances_of_type<CustomComponent1>(); destroy_all_instances_of_type<CustomComponent2>(); etc...
+    // destroy_all_instances_of_type<CustomComponent1>(); 
+    // destroy_all_instances_of_type<CustomComponent2>(); etc...
 } arena;
 ```
 
@@ -57,7 +60,8 @@ struct Arena {
 struct Entity {
     const string tag{};
 
-    unordered_map<type_index, Component *> hot_components{}; // for frequently accessed components. It's long to add components and iterate over them, but fast to seek
+    unordered_map<type_index, Component *> hot_components{}; 
+    // for frequently accessed components. It's long to add components and iterate over them, but fast to seek
     vector<tuple<type_index, Component *>> cold_components{};
 
     template<typename T>
@@ -72,7 +76,7 @@ struct Entity {
     void cleanup(); // filter out empty cold components
 };
 ```
-##### Example usage:
+#### Example usage:
 ```c++
 int main() {
     auto entity = arena.new_instance<Entity>();
